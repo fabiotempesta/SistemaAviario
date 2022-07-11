@@ -3,6 +3,7 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <SPIFFS.h>
+#include <ESP_Google_Sheet_Client.h>
 #include "DHT.h"
 #include "ESPAsyncWebServer.h"
 
@@ -16,6 +17,12 @@
 #define PIN_FAN 4 
 #define PIN_NEBULIZER 5  
 
+// ---Google Sheets---
+#define PROJECT_ID "esp32-sistema-aviario"
+#define CLIENT_EMAIL 
+const char PRIVATE_KEY[] PROGMEM = 
+const char SPREADSHEET_ID[] PROGMEM = "1WAGvzfbu8AwclL53U0DNYz3XNECpaJQcgW4RCpPri-M";
+
 //---Configuração de bibliotecas---
 #define DHTYPE DHT11
 DHT dht(PIN_DHT11, DHTYPE);
@@ -24,8 +31,8 @@ DallasTemperature ds18b20(&oneWire);
 AsyncWebServer server(80);
 
 //---Conexão na rede local sem fio---
-const char* ssid     = "Sistema Aviário v1";
-const char* password = "user12345678";
+const char* ssid     = "Bethpsi";
+const char* password = "raulfabio21";
 
 //---Variáveis globais---
 
@@ -43,30 +50,53 @@ int parameter_nipple_off_time = 8000;
 float parameter_fan_on_temperature = 23.5;
 float parameter_fan_off_temperature = 22;
 
+long update_time = 0;
+int error_read_counter = 5; //máximo de erros para atualização do sensor
+int error_write_sheet_counter = 5; //máximo de erros para atualização da planilha
+
 
 //Valores atuais rebido dos sensores
 float current_nipple_temp = 0;
 float current_box_temp = 0;
 float current_climate_temp = 0;
-float current_climate_humidity = 0;
+float current_climate_humidity = 0;  
 
 //Variáveis de tempo para função millis()
-long update_time = 0;
 long exchanger_time = 0;
 
 //Variável para auxiliar desligar ou manter o ventilador ligado após desligar o nebulizador
 bool fan_on_directly = 0;
-
-//Variáveis para informar erro de leitura do sensor
-int error_read_dht11 = 0;
-int error_read_nipple = 0;
-int error_read_box = 0;
 
  
 //Modos de operação
 bool operation_mode_nebulizer = false; //false = automático | true = manual
 bool operation_mode_fan = false; //false = automático | true = manual
 bool operation_mode_exchanger = true; //false = automático | true = manual
+
+
+void writeSensorsValueInSheet (){
+  bool ready = GSheet.ready();
+
+    if (ready)
+    {
+
+        FirebaseJson response, valueRange, valueRangeDate;
+        
+        
+        valueRange.add("majorDimension", "COLUMNS");
+        valueRange.set("values/[0]/[0]", String(current_climate_temp));
+        valueRange.set("values/[1]/[0]", String(current_climate_humidity));
+        valueRange.set("values/[2]/[0]", String(current_nipple_temp));
+        valueRange.set("values/[3]/[0]", String(current_box_temp));
+        
+        GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!A1:D1", &valueRange);
+        response.toString(Serial, true);
+
+        
+        
+          
+    }
+}
 
 
 bool stringToBool(String n){ //qualquer valor diferente de 1 retornará false
@@ -228,48 +258,61 @@ void printSensorsValue(){
   
 }
 
-
-
 void updateSensorsValue(){
 
 	ds18b20.requestTemperatures(); 
-  if ((!(isnan( dht.readTemperature()) || isnan(dht.readHumidity()))) || error_read_dht11 >= 4 ) {
-    current_climate_temp = dht.readTemperature();
-    current_climate_humidity = dht.readHumidity();
-    error_read_dht11 = 0;
-  }else{
-    error_read_dht11++;
-  }
-  if ((ds18b20.getTempCByIndex(0) != -127.00) || error_read_nipple >= 4 ) {
-	  current_nipple_temp = ds18b20.getTempCByIndex(0);
-    error_read_nipple = 0;
-  }else{
-    error_read_nipple++;
+  
+  for(int i=0; i < error_read_counter; i++){ 
+    if ((!(isnan( dht.readTemperature()) || isnan(dht.readHumidity()))) || (i >= error_read_counter - 1) ) {
+      current_climate_temp = dht.readTemperature();
+      current_climate_humidity = dht.readHumidity();
+      break;
+    }
+    delay(4000);
+    
   }
 
-  if (ds18b20.getTempCByIndex(1) > -50 || error_read_box >= 4 ) {
-	  current_box_temp = ds18b20.getTempCByIndex(1);
-    error_read_box = 0;
-  }else{
-    error_read_box++;
+  for(int i=0; i < error_read_counter; i++){ 
+    if ((ds18b20.getTempCByIndex(0) != -127.00) || (i >= error_read_counter - 1) ) {
+      current_nipple_temp = ds18b20.getTempCByIndex(0);
+      break;
+    }
+    delay(4000);
+    
+  }
+
+  for(int i=0; i < error_read_counter; i++){ 
+    if ((ds18b20.getTempCByIndex(1) != -127.00) || (i >= error_read_counter - 1) ) {
+      current_box_temp = ds18b20.getTempCByIndex(1);
+      break;
+    }
+    delay(4000);
+    
   }
 	
 }
 
 void taskCore0UpdateValues( void * pvParameters ){
   for(;;){
-    printActuators();
+    //printActuators();
     updateSensorsValue();
     printSensorsValue();
+    writeSensorsValueInSheet();
     
-    automaticModeExchanger();
-    automaticModeFan();
-    automaticModeNebulizer();
+    if(current_box_temp != -127 && current_nipple_temp != -127){
+      automaticModeExchanger();
+    }
 
-    delay(6000);
+    if(!(isnan(current_climate_humidity) || isnan(current_climate_temp))){
+      automaticModeNebulizer();
+      automaticModeFan();
+    }
+
+    delay(300000);
   }
 
 }
+
 void taskCore0ExchangerOff( void * pvParameters ){
   for(;;){
     changeWaterOff();
@@ -313,19 +356,29 @@ void setup() {
   Serial.print("Conectando em ");
   Serial.println(ssid);
 
-  // Connect to Wi-Fi network with SSID and password
-  Serial.print("Setting AP (Access Point)…");
-  // Remove the password parameter, if you want the AP (Access Point) to be open
-  WiFi.softAP(ssid, password);
+
+  WiFi.begin(ssid, password);
   
-  IPAddress IP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
-  Serial.println(IP);
-  
+  long time_out_connect = 30000 + millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    if (time_out_connect > millis()){
+      WiFi.reconnect();
+      long time_out_connect = 30000 + millis();
+    }
+  }
   if(!SPIFFS.begin()){
         Serial.println("An Error has occurred while mounting SPIFFS");
         return;
   }
+  
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  GSheet.begin(CLIENT_EMAIL, PROJECT_ID, PRIVATE_KEY);
 
   // URL para raiz (index)
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -361,35 +414,6 @@ void setup() {
   server.on("/img/logo.png", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(SPIFFS, "/img/logo.png", "image/png");
   });
-
-  /*server.on("/img/air_temperature.png", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/img/air_temperature.png", "image/png");
-  });
-
-  server.on("/img/exchanger.png", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/img/exchanger.png", "image/png");
-  });
-
-  server.on("/img/box_temperature.png", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/img/box_temperature.png", "image/png");
-  });
-
-  server.on("/img/fan.png", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/img/fan.png", "image/png");
-  });
-
-  server.on("/img/humidity.png", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/img/humidity.png", "image/png");
-  });
-
-  server.on("/img/nebulizer.png", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/img/nebulizer.png", "image/png");
-  });
-
-  server.on("/img/nipple_temperature.png", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/img/nipple_temperature.png", "image/png");
-  });*/
-
 
 
 
@@ -789,6 +813,6 @@ void setup() {
 
 void loop() {
 
-
+  
   
 }

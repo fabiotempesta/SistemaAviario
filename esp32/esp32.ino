@@ -86,14 +86,35 @@ void writeSensorsValueInSheet (){
     if (ready)
     {
       error_write_google_sheet = false;
-      FirebaseJson response, valueRange, valueRangeDate;
+      FirebaseJson response, valueRange, valueRangeForTime;
+
+      FirebaseJsonData result;
+
+      
+
+      delay(200);
+
       valueRange.add("majorDimension", "COLUMNS");
       valueRange.set("values/[0]/[0]", String(current_climate_temp));
       valueRange.set("values/[1]/[0]", String(current_climate_humidity));
       valueRange.set("values/[2]/[0]", String(current_nipple_temp));
       valueRange.set("values/[3]/[0]", String(current_box_temp));
-      
-      GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!A1:D1", &valueRange);
+
+      GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!A1:F1", &valueRange);
+
+      GSheet.values.get(&response, SPREADSHEET_ID, "Sheet1!G2");
+      response.toString(Serial, true);
+      Serial.println("");
+
+      response.get(result, "values/[0]/[0]");
+      if(result.success){
+        valueRangeForTime.add("majorDimension", "COLUMNS");
+        valueRangeForTime.set("values/[0]/[0]", result.to<String>());
+  
+        GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!E1", &valueRangeForTime);
+        response.toString(Serial, true);
+      }
+
       response.toString(Serial, true);
 
     }else{

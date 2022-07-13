@@ -22,6 +22,7 @@
 #define CLIENT_EMAIL 
 const char PRIVATE_KEY[] PROGMEM = 
 const char SPREADSHEET_ID[] PROGMEM = "1WAGvzfbu8AwclL53U0DNYz3XNECpaJQcgW4RCpPri-M";
+bool error_write_google_sheet = false;
 
 //---Configuração de bibliotecas---
 #define DHTYPE DHT11
@@ -61,11 +62,6 @@ float current_box_temp = 0;
 float current_climate_temp = 0;
 float current_climate_humidity = 0;  
 
-//Flag de erro de leitura dos sensores
-bool error_read_nipple_temp = false;
-bool error_read_box_temp = false;
-bool error_read_dht = false;
-bool error_write_google_sheet = false;
 
 //Variáveis de tempo para função millis()
 long exchanger_time = 0;
@@ -90,10 +86,6 @@ void writeSensorsValueInSheet (){
 
       FirebaseJsonData result;
 
-      
-
-      delay(200);
-
       valueRange.add("majorDimension", "COLUMNS");
       valueRange.set("values/[0]/[0]", String(current_climate_temp));
       valueRange.set("values/[1]/[0]", String(current_climate_humidity));
@@ -102,20 +94,9 @@ void writeSensorsValueInSheet (){
 
       GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!A1:F1", &valueRange);
 
-      GSheet.values.get(&response, SPREADSHEET_ID, "Sheet1!G2");
       response.toString(Serial, true);
-      Serial.println("");
-
-      response.get(result, "values/[0]/[0]");
-      if(result.success){
-        valueRangeForTime.add("majorDimension", "COLUMNS");
-        valueRangeForTime.set("values/[0]/[0]", result.to<String>());
-  
-        GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!E1", &valueRangeForTime);
-        response.toString(Serial, true);
-      }
-
-      response.toString(Serial, true);
+      
+      
 
     }else{
       error_write_google_sheet = true;
@@ -286,30 +267,10 @@ void updateSensorsValue(){
 
 	ds18b20.requestTemperatures(); 
    
-  if ((!(isnan( dht.readTemperature()) || isnan(dht.readHumidity()))) ) {
-    current_climate_temp = dht.readTemperature();
-    current_climate_humidity = dht.readHumidity();
-    error_read_dht = false;
-  }else{
-    error_read_dht = true;
-  }
-    
-  
-
-  if ((ds18b20.getTempCByIndex(0) != -127.00) ) {
-    current_nipple_temp = ds18b20.getTempCByIndex(0);
-    error_read_nipple_temp = false;
-  }else{
-    error_read_nipple_temp = true;
-  }
-
-
-  if ((ds18b20.getTempCByIndex(1) != -127.00) ) {
-    current_box_temp = ds18b20.getTempCByIndex(1);
-    error_read_box_temp = false;
-  }else{
-    error_read_box_temp = true;
-  }
+  current_nipple_temp = ds18b20.getTempCByIndex(0);
+  current_box_temp = ds18b20.getTempCByIndex(1);
+  current_climate_temp = dht.readTemperature();
+  current_climate_humidity = dht.readHumidity();
 	
 }
 
@@ -319,17 +280,8 @@ void taskCore0UpdateValues( void * pvParameters ){
     updateSensorsValue();
     printSensorsValue();
     writeSensorsValueInSheet();
-    
-    if(!error_read_box_temp && !error_read_nipple_temp){
-      automaticModeExchanger();
-    }
 
-    if(!error_read_dht){
-      automaticModeNebulizer();
-      automaticModeFan();
-    }
-
-    delay(300000);
+    delay(20000);
   }
 
 }
@@ -343,35 +295,14 @@ void taskCore1ExchangerOff( void * pvParameters ){
 
 }
 
-void taskCore0TryReadWriteSensorsError( void * pvParameters ){
+void taskCore0TryWriteSensors( void * pvParameters ){
   for(;;){
-    if (error_read_box_temp || error_read_nipple_temp){
-      ds18b20.requestTemperatures(); 
-      
-      if (error_read_box_temp && (ds18b20.getTempCByIndex(1) != -127.00) ) {
-        error_read_box_temp = false;
-        current_box_temp = ds18b20.getTempCByIndex(1);
-      }
-
-      if (error_read_nipple_temp && (ds18b20.getTempCByIndex(0) != -127.00) ) {
-        error_read_nipple_temp = false;
-        current_nipple_temp = ds18b20.getTempCByIndex(0);
-      }
-    }
-
-    if (error_read_dht){
-      if ((!(isnan( dht.readTemperature()) || isnan(dht.readHumidity()))) ) {
-        current_climate_temp = dht.readTemperature();
-        current_climate_humidity = dht.readHumidity();
-        error_read_dht = false;
-      }
-    }
     
     if(error_write_google_sheet){
       writeSensorsValueInSheet();
     }
 
-    delay(8000);
+    delay(1500);
   }
 
 }
@@ -405,8 +336,8 @@ void setup() {
                     1); 
 
   xTaskCreatePinnedToCore(
-                    taskCore0TryReadWriteSensorsError,   /* função que implementa a tarefa */
-                    "taskCore0TryReadWriteSensorsError", /* nome da tarefa */
+                    taskCore0TryWriteSensors,   /* função que implementa a tarefa */
+                    "taskCore0TryWriteSensors", /* nome da tarefa */
                     8000,      /* número de palavras a serem alocadas para uso com a pilha da tarefa */
                     NULL,       /* parâmetro de entrada para a tarefa (pode ser NULL) */
                     3,          /* prioridade da tarefa (0 a N) */

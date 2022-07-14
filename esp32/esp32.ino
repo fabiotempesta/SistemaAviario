@@ -69,6 +69,9 @@ long exchanger_time = 0;
 //Variável para auxiliar desligar ou manter o ventilador ligado após desligar o nebulizador
 bool fan_on_directly = 0;
 
+//Contador de instâncias mandadas ao google sheet
+int counter_write = 1;
+
  
 //Modos de operação
 bool operation_mode_nebulizer = false; //false = automático | true = manual
@@ -82,7 +85,14 @@ void writeSensorsValueInSheet (){
     if (ready)
     {
       error_write_google_sheet = false;
-      FirebaseJson response, valueRange, valueRangeForTime;
+      FirebaseJson response, valueRange, valueRangeCounter;
+
+      valueRangeCounter.add("majorDimension", "COLUMNS");
+      valueRangeCounter.set("values/[0]/[0]", "  ");
+      
+      GSheet.values.update(&response , SPREADSHEET_ID , "Sheet1!H2", &valueRangeCounter);
+      
+      response.toString(Serial, true);
 
       FirebaseJsonData result;
 
@@ -92,9 +102,9 @@ void writeSensorsValueInSheet (){
       valueRange.set("values/[2]/[0]", String(current_nipple_temp));
       valueRange.set("values/[3]/[0]", String(current_box_temp));
 
-      GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!A1:F1", &valueRange);
+      //GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!A1:D1", &valueRange);
 
-      response.toString(Serial, true);
+      //response.toString(Serial, true);
       
       
 

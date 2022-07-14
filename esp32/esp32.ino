@@ -102,6 +102,19 @@ void writeSensorsValueInSheet (){
       valueRange.set("values/[2]/[0]", String(current_nipple_temp));
       valueRange.set("values/[3]/[0]", String(current_box_temp));
 
+
+      GSheet.values.get(&response, SPREADSHEET_ID, "Sheet1!G2");
+      response.toString(Serial, true);
+      Serial.println("");
+
+      response.get(result, "values/[0]/[0]");
+      if(result.success){
+        valueRangeForTime.add("majorDimension", "COLUMNS");
+        valueRangeForTime.set("values/[0]/[0]", result.to<String>());
+  
+        GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!E1", &valueRangeForTime);
+        response.toString(Serial, true);
+      }
       //GSheet.values.append(&response , SPREADSHEET_ID , "Sheet1!A1:D1", &valueRange);
 
       //response.toString(Serial, true);
